@@ -21,9 +21,14 @@ a person who has just woken up should not have to find a small target.
 ## Running it
 
 ```
-nap-alarm daemon   # the scheduler, meant for a systemd user service
-nap-alarm          # the settings window
+nap-alarm                # scheduler, tray icon and settings window, all of it
+nap-alarm --background   # the same without opening the window, for a service unit
 ```
+
+One command, one process, one window. Running it again while it is already up
+does not start a second scheduler or a second window: the new process signals
+the running one to bring its window forward and exits. Two schedulers would ring
+twice, and a fresh window per launch is worse than no window at all.
 
 The daemon polls the wall clock every twenty seconds rather than sleeping until
 the next alarm. A long sleep wakes at the wrong time after a suspend or a clock

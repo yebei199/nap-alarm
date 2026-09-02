@@ -4,8 +4,6 @@
 //! 走 StatusNotifierItem(D-Bus),这是 Wayland 上唯一还活着的托盘协议,DMS 的
 //! Quickshell 托盘就是它的 host。
 
-use std::process::Command;
-
 use ksni::{
     blocking::TrayMethods, menu::StandardItem, MenuItem,
     ToolTip, Tray,
@@ -15,6 +13,8 @@ use ksni::{
 pub struct AlarmTray {
     /// 下一次响铃的说法,例如"周三 13:30";没有生效的闹钟时是"没有闹钟"。
     pub next_fire: String,
+    /// 把设置窗口叫出来。窗口全程只有一个,归守护自己拿着,这里只是请它露面。
+    pub open_settings: fn(),
 }
 
 impl Tray for AlarmTray {
@@ -33,7 +33,7 @@ impl Tray for AlarmTray {
     /// 左键点图标就开设置。托盘图标点了没反应,谁都会以为程序卡住了 —— 而"设置在
     /// 右键菜单里"这件事,只有写它的人知道。
     fn activate(&mut self, _x: i32, _y: i32) {
-        open_settings();
+        (self.open_settings)();
     }
 
     fn tool_tip(&self) -> ToolTip {
@@ -55,7 +55,9 @@ impl Tray for AlarmTray {
             MenuItem::Separator,
             StandardItem {
                 label: "设置".into(),
-                activate: Box::new(|_| open_settings()),
+                activate: Box::new(|tray: &mut Self| {
+                    (tray.open_settings)()
+                }),
                 ..Default::default()
             }
             .into(),
@@ -177,29 +179,21 @@ fn distance_to_segment(
     .sqrt()
 }
 
-/// 设置窗口另起一个进程,不在守护里开:守护每 20 秒重读配置,改完自然就生效,
-/// 省掉两个事件循环共用一份状态的麻烦。
-fn open_settings() {
-    let Ok(binary) = std::env::current_exe() else {
-        eprintln!(
-            "nap-alarm: 找不到自己的可执行文件,开不了设置"
-        );
-        return;
-    };
-    if let Err(error) = Command::new(binary).spawn() {
-        eprintln!("nap-alarm: 设置窗口起不来:{error}");
-    }
-}
-
-/// 挂上托盘图标。没有 SNI host(比如托盘还没起来)时只报一声,闹钟照常响。
+/// 挂上托盘图标。没有 SNI host 时只报一声,闹钟照常响。
 pub fn spawn(
     next_fire: String,
+    open_settings: fn(),
 ) -> Option<ksni::blocking::Handle<AlarmTray>> {
-    match (AlarmTray { next_fire }).spawn() {
+    match (AlarmTray {
+        next_fire,
+        open_settings,
+    })
+    .spawn()
+    {
         Ok(handle) => Some(handle),
         Err(error) => {
             eprintln!(
-                "nap-alarm: 托盘挂不上({error}),闹钟照常走"
+                "nap-alarm: 托盘挂不上({error}),闹钟照常响"
             );
             None
         }

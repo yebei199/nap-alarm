@@ -1,4 +1,8 @@
-//! 入口:`nap-alarm daemon` 跑常驻调度,不带参数打开设置窗口。
+//! 入口。跑起来就是一体的:抢到守护身份就把调度与托盘一并起来,同时把设置窗口
+//! 摆出来;已经有守护在跑时,这一次运行就只开设置窗口,不会再起一个调度器——两个
+//! 调度器到点会一起响。
+//!
+//! `--background` 只给 systemd 用:开机自启时弹一个设置窗口没人受得了。
 //!
 //! 守护自己算时间,不依赖 systemd timer:每 20 秒轮询一次,读一遍配置再问 Scheduler
 //! 这一分钟有没有闹钟该响。轮询而不是"睡到下一次触发",是因为挂起唤醒和改系统时间
@@ -9,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use chrono::{
@@ -19,6 +23,13 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 
 use nap_alarm::config::{self, Alarm, Config};
 use nap_alarm::headset;
+use nap_alarm::instance;
+
+/// 全程唯一的那个设置窗口。托盘点击与第二次运行发来的信号都只是请它露面,
+/// 谁都不再新建一个——满桌面的同名窗口比没有窗口更烦人。
+static SETTINGS_WINDOW: OnceLock<
+    slint::Weak<SettingsWindow>,
+> = OnceLock::new();
 use nap_alarm::schedule::{self, Scheduler};
 use nap_alarm::tray;
 use nap_alarm::{AlarmRow, RingWindow, SettingsWindow};
@@ -38,22 +49,106 @@ const WEEKDAYS: [Weekday; 7] = [
 
 fn main() {
     match std::env::args().nth(1).as_deref() {
-        Some("daemon") => daemon(),
-        None => settings(),
+        None => run(true),
+        // systemd 走这条:只起后台,不弹窗。
+        Some("--background") => run(false),
         Some(other) => {
-            eprintln!("nap-alarm: 不认识的参数 {other:?};用法:nap-alarm [daemon]");
+            eprintln!("nap-alarm: 不认识的参数 {other:?};用法:nap-alarm [--background]");
             std::process::exit(2);
         }
     }
 }
 
+/// 起程序。抢到守护身份就带上调度、托盘和那唯一一个设置窗口;没抢到就把已经在跑
+/// 的那个实例的窗口叫出来,自己退出——每运行一次多一个同名窗口,比没有窗口更烦人。
+fn run(show_settings: bool) {
+    let pid_file = instance::pid_file();
+    let is_daemon = instance::claim(
+        &pid_file,
+        std::process::id(),
+        |pid| {
+            instance::daemon_is_running(
+                Path::new("/proc"),
+                pid,
+            )
+        },
+    );
+
+    if !is_daemon {
+        ask_running_instance_to_show_settings(&pid_file);
+        return;
+    }
+
+    daemon(show_settings);
+    instance::release(&pid_file);
+}
+
+/// 给已经在跑的那个实例发 SIGUSR1,请它把自己的窗口摆出来。
+fn ask_running_instance_to_show_settings(pid_file: &Path) {
+    let Some(pid) = instance::holder_pid(pid_file) else {
+        eprintln!(
+            "nap-alarm: 已经有一个在跑,但找不到它的进程号"
+        );
+        return;
+    };
+
+    let target = rustix::process::Pid::from_raw(pid as i32);
+    let sent = target.and_then(|target| {
+        rustix::process::kill_process(
+            target,
+            rustix::process::Signal::USR1,
+        )
+        .ok()
+    });
+    if sent.is_none() {
+        eprintln!("nap-alarm: 叫不动已经在跑的那个实例(pid {pid})");
+    }
+}
+
+/// 把那个唯一的设置窗口叫到前面来。托盘线程与信号线程都从这里进,所以要绕回
+/// Slint 的事件循环:窗口只能在它自己的线程上碰。
+fn show_settings_window() {
+    let Some(window) = SETTINGS_WINDOW.get() else {
+        return;
+    };
+    let _ = window.upgrade_in_event_loop(|window| {
+        if let Err(error) = window.show() {
+            eprintln!(
+                "nap-alarm: 设置窗口显示不出来:{error}"
+            );
+        }
+    });
+}
+
+/// 收 SIGUSR1:第二次运行本程序时,它就发这个信号来把窗口叫出来,自己随即退出。
+fn watch_for_open_requests() {
+    std::thread::spawn(|| {
+        let mut signals =
+            match signal_hook::iterator::Signals::new([
+                signal_hook::consts::SIGUSR1,
+            ]) {
+                Ok(signals) => signals,
+                Err(error) => {
+                    eprintln!("nap-alarm: 收不了信号({error}),再次运行叫不出窗口");
+                    return;
+                }
+            };
+        for _ in signals.forever() {
+            show_settings_window();
+        }
+    });
+}
+
 /// 常驻调度。窗口关掉也不退出,所以走 run_event_loop_until_quit。
-fn daemon() {
+fn daemon(show_settings: bool) {
     let path = config::default_path();
     let scheduler = Rc::new(RefCell::new(Scheduler::new()));
 
     // 托盘先起:守护没有常驻窗口,没有图标就等于隐形。
-    let tray = tray::spawn("没有闹钟".into());
+    let tray = tray::spawn(
+        "没有闹钟".into(),
+        show_settings_window,
+    );
     // 正在响的那个窗口得有人拿着:句柄一丢,窗口就没了。
     let ringing: Rc<RefCell<Option<RingWindow>>> =
         Rc::new(RefCell::new(None));
@@ -93,6 +188,17 @@ fn daemon() {
             }
         },
     );
+
+    // 设置窗口全程只建这一个。句柄留在这儿别让它被回收,弱引用交给托盘和信号线程,
+    // 它们只能请它露面,不能再造一个。
+    let settings = build_settings_window();
+    if let Some(window) = settings.as_ref() {
+        let _ = SETTINGS_WINDOW.set(window.as_weak());
+        if show_settings {
+            show_settings_window();
+        }
+    }
+    watch_for_open_requests();
 
     if let Err(error) = slint::run_event_loop_until_quit() {
         eprintln!("nap-alarm: 事件循环起不来:{error}");
@@ -226,7 +332,8 @@ impl Editor {
     }
 }
 
-fn settings() {
+/// 建好设置窗口并接上全部回调,露不露面由调用方决定。
+fn build_settings_window() -> Option<SettingsWindow> {
     let path = config::default_path();
     let config =
         config::load(&path).unwrap_or_else(|error| {
@@ -240,7 +347,7 @@ fn settings() {
             eprintln!(
                 "nap-alarm: 设置窗口建不出来:{error}"
             );
-            std::process::exit(1);
+            return None;
         }
     };
 
@@ -351,10 +458,7 @@ fn settings() {
         }
     });
 
-    if let Err(error) = window.run() {
-        eprintln!("nap-alarm: 设置窗口跑不起来:{error}");
-        std::process::exit(1);
-    }
+    Some(window)
 }
 
 /// 新闹钟的默认样子:工作日午休结束,且只在耳机连着时响。

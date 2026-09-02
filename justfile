@@ -5,15 +5,10 @@ shell := "nix develop -c"
 default:
     @just --list
 
-# 设置窗口。不带参数跑的就是它,托盘图标不在这个模式里。
+# 起程序:后台调度、托盘图标、设置窗口都在这一个命令里。已经在跑时只会把窗口
+# 叫到前面,不会再起一个实例。
 run:
     {{shell}} cargo run
-
-# 常驻守护:调度、响铃、托盘图标都在这个模式下,想看托盘就跑这个。
-daemon:
-    # 先清掉上一个实例,否则两个守护会同时响。
-    -pkill -x nap-alarm
-    {{shell}} cargo run -- daemon
 
 test:
     {{shell}} cargo test
