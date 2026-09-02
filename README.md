@@ -35,7 +35,10 @@ late, and an alarm fires once in its minute however often it is polled.
 A resident daemon with no window is invisible: nothing says whether it is
 running, when it will ring next, or where its settings are. So it registers a
 StatusNotifierItem — the only tray protocol still alive on Wayland — showing
-the next alarm, a way into the settings window, and a way out.
+the next alarm, a way into the settings window, and a way out. Clicking the icon
+opens the settings too: an icon that does nothing when clicked reads as a hung
+program, and "the settings are in the right-click menu" is known only to whoever
+wrote it.
 
 The icon is drawn in code rather than named. An icon name is resolved by the
 tray host in *its* icon theme, and a machine whose only themes are hicolor and

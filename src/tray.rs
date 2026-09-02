@@ -30,6 +30,12 @@ impl Tray for AlarmTray {
         vec![clock_icon()]
     }
 
+    /// 左键点图标就开设置。托盘图标点了没反应,谁都会以为程序卡住了 —— 而"设置在
+    /// 右键菜单里"这件事,只有写它的人知道。
+    fn activate(&mut self, _x: i32, _y: i32) {
+        open_settings();
+    }
+
     fn tool_tip(&self) -> ToolTip {
         ToolTip {
             title: "闹钟".into(),
