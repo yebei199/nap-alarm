@@ -1,7 +1,169 @@
-// 界面骨架:响铃窗口与设置窗口等测试评审通过后再填。
+import { Button, CheckBox, LineEdit, ListView, ScrollView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+// 界面里的一条闹钟。星期用七个布尔,顺序是周一到周日。
+export struct AlarmRow {
+    label: string,
+    time: string,
+    days: [bool],
+    enabled: bool,
+    require-headset: bool,
+    next-fire: string,
+}
+
+// 响铃窗口。点窗口任何地方都算按掉,不用去找那个按钮。
 export component RingWindow inherits Window {
+    in property <string> label: "闹钟";
+    in property <string> time: "";
+    callback stop();
+
     title: "闹钟";
-    Text {
-        text: "闹钟";
+    preferred-width: 420px;
+    preferred-height: 240px;
+    background: #1b1b1f;
+
+    TouchArea {
+        clicked => {
+            root.stop();
+        }
+
+        VerticalBox {
+            alignment: center;
+            spacing: 16px;
+
+            Text {
+                text: root.time;
+                font-size: 56px;
+                color: #f5f5f5;
+                horizontal-alignment: center;
+            }
+
+            Text {
+                text: root.label;
+                font-size: 20px;
+                color: #c8c8cc;
+                horizontal-alignment: center;
+            }
+
+            Text {
+                text: "点一下关掉";
+                font-size: 13px;
+                color: #8a8a90;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}
+
+// 设置窗口。改动即时存盘,所以没有保存按钮。
+export component SettingsWindow inherits Window {
+    in-out property <[AlarmRow]> alarms;
+    in-out property <string> sound;
+
+    callback add-alarm();
+    callback delete-alarm(int);
+    callback set-label(int, string);
+    callback set-time(int, string);
+    callback toggle-day(int, int);
+    callback toggle-enabled(int);
+    callback toggle-headset(int);
+    callback set-sound(string);
+
+    title: "闹钟设置";
+    preferred-width: 900px;
+    preferred-height: 520px;
+
+    VerticalBox {
+        spacing: 12px;
+
+        HorizontalBox {
+            spacing: 8px;
+            Text {
+                text: "铃声";
+                vertical-alignment: center;
+            }
+
+            LineEdit {
+                text: root.sound;
+                placeholder-text: "音频文件路径";
+                edited(value) => {
+                    root.set-sound(value);
+                }
+            }
+        }
+
+        ListView {
+            for row[index] in root.alarms: HorizontalBox {
+                spacing: 8px;
+                padding: 4px;
+
+                CheckBox {
+                    checked: row.enabled;
+                    toggled => {
+                        root.toggle-enabled(index);
+                    }
+                }
+
+                LineEdit {
+                    width: 110px;
+                    text: row.time;
+                    edited(value) => {
+                        root.set-time(index, value);
+                    }
+                }
+
+                LineEdit {
+                    width: 200px;
+                    text: row.label;
+                    edited(value) => {
+                        root.set-label(index, value);
+                    }
+                }
+
+                // 星期给死宽度,否则 HorizontalBox 会把七个复选框摊满整行。
+                for day[weekday] in row.days: CheckBox {
+                    width: 56px;
+                    text: ["一", "二", "三", "四", "五", "六", "日"][weekday];
+                    checked: day;
+                    toggled => {
+                        root.toggle-day(index, weekday);
+                    }
+                }
+
+                CheckBox {
+                    width: 92px;
+                    text: "限耳机";
+                    checked: row.require-headset;
+                    toggled => {
+                        root.toggle-headset(index);
+                    }
+                }
+
+                // 空白都塞给这块,右边的"下次"与删除才不会被推到天边。
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                Text {
+                    width: 120px;
+                    text: row.next-fire;
+                    vertical-alignment: center;
+                    color: #7a7a80;
+                }
+
+                Button {
+                    text: "删除";
+                    clicked => {
+                        root.delete-alarm(index);
+                    }
+                }
+            }
+        }
+
+        Button {
+            text: "添加闹钟";
+            clicked => {
+                root.add-alarm();
+            }
+        }
     }
 }
