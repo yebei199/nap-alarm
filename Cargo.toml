@@ -1,0 +1,37 @@
+[package]
+name = "nap-alarm"
+version = "0.1.0"
+edition = "2021"
+description = "Tiny Slint alarm clock that only rings into a connected bluetooth headset"
+license = "GPL-3.0-only"
+
+[lib]
+name = "nap_alarm"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nap-alarm"
+path = "src/main.rs"
+
+[dependencies]
+# 渲染后端跟 wallpaper-picker 保持一致:femtovg 编译快、产物小,这个界面用不上
+# skia 的独占能力。
+slint = { version = "1.17", default-features = false, features = [
+  "std",
+  "compat-1-2",
+  "backend-winit",
+  "renderer-femtovg",
+] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+thiserror = "2"
+
+[build-dependencies]
+slint-build = "1.17"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+strip = true
