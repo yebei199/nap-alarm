@@ -171,6 +171,42 @@ fn distance_to_segment(
     .sqrt()
 }
 
+/// 设置窗口另起一个进程,不在守护里开:守护每 20 秒重读配置,改完自然就生效,
+/// 省掉两个事件循环共用一份状态的麻烦。
+fn open_settings() {
+    let Ok(binary) = std::env::current_exe() else {
+        eprintln!(
+            "nap-alarm: 找不到自己的可执行文件,开不了设置"
+        );
+        return;
+    };
+    if let Err(error) = Command::new(binary).spawn() {
+        eprintln!("nap-alarm: 设置窗口起不来:{error}");
+    }
+}
+
+/// 挂上托盘图标。没有 SNI host(比如托盘还没起来)时只报一声,闹钟照常响。
+pub fn spawn(
+    next_fire: String,
+) -> Option<ksni::blocking::Handle<AlarmTray>> {
+    match (AlarmTray { next_fire }).spawn() {
+        Ok(handle) => Some(handle),
+        Err(error) => {
+            eprintln!(
+                "nap-alarm: 托盘挂不上({error}),闹钟照常走"
+            );
+            None
+        }
+    }
+}
+
+/// 菜单回调跑在 ksni 自己的线程上,退出得回到 Slint 的事件循环里做。
+fn quit_daemon() {
+    let _ = slint::invoke_from_event_loop(|| {
+        let _ = slint::quit_event_loop();
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,40 +262,4 @@ mod tests {
             "画出来的像素只有 {painted} 个,基本等于空白"
         );
     }
-}
-
-/// 设置窗口另起一个进程,不在守护里开:守护每 20 秒重读配置,改完自然就生效,
-/// 省掉两个事件循环共用一份状态的麻烦。
-fn open_settings() {
-    let Ok(binary) = std::env::current_exe() else {
-        eprintln!(
-            "nap-alarm: 找不到自己的可执行文件,开不了设置"
-        );
-        return;
-    };
-    if let Err(error) = Command::new(binary).spawn() {
-        eprintln!("nap-alarm: 设置窗口起不来:{error}");
-    }
-}
-
-/// 挂上托盘图标。没有 SNI host(比如托盘还没起来)时只报一声,闹钟照常响。
-pub fn spawn(
-    next_fire: String,
-) -> Option<ksni::blocking::Handle<AlarmTray>> {
-    match (AlarmTray { next_fire }).spawn() {
-        Ok(handle) => Some(handle),
-        Err(error) => {
-            eprintln!(
-                "nap-alarm: 托盘挂不上({error}),闹钟照常走"
-            );
-            None
-        }
-    }
-}
-
-/// 菜单回调跑在 ksni 自己的线程上,退出得回到 Slint 的事件循环里做。
-fn quit_daemon() {
-    let _ = slint::invoke_from_event_loop(|| {
-        let _ = slint::quit_event_loop();
-    });
 }
