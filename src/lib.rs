@@ -6,3 +6,4 @@ slint::include_modules!();
 pub mod config;
 pub mod headset;
 pub mod schedule;
+pub mod tray;

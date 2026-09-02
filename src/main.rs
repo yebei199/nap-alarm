@@ -20,6 +20,7 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 use nap_alarm::config::{self, Alarm, Config};
 use nap_alarm::headset;
 use nap_alarm::schedule::{self, Scheduler};
+use nap_alarm::tray;
 use nap_alarm::{AlarmRow, RingWindow, SettingsWindow};
 
 /// 轮询间隔。闹钟按分钟触发,20 秒保证每一分钟至少被查到一次。
@@ -50,6 +51,9 @@ fn main() {
 fn daemon() {
     let path = config::default_path();
     let scheduler = Rc::new(RefCell::new(Scheduler::new()));
+
+    // 托盘先起:守护没有常驻窗口,没有图标就等于隐形。
+    let tray = tray::spawn("没有闹钟".into());
     // 正在响的那个窗口得有人拿着:句柄一丢,窗口就没了。
     let ringing: Rc<RefCell<Option<RingWindow>>> =
         Rc::new(RefCell::new(None));
@@ -68,6 +72,11 @@ fn daemon() {
             };
 
             let now = Local::now().naive_local();
+            if let Some(tray) = tray.as_ref() {
+                let summary = next_fire_summary(&config, now);
+                tray.update(move |tray| tray.next_fire = summary);
+            }
+
             for index in scheduler
                 .borrow_mut()
                 .poll(&config.alarms, now)
@@ -76,6 +85,8 @@ fn daemon() {
                 let sink = headset::connected_headset();
                 // 耳机没连就整轮跳过:外放会吵到别人,而且人没戴耳机时本来也叫不醒。
                 if alarm.require_headset && sink.is_none() {
+                    // 出一声日志:跳过和"闹钟坏了"在外面看起来一模一样。
+                    eprintln!("nap-alarm: {} 到点了,但耳机没连,跳过", alarm.label);
                     continue;
                 }
                 ring(alarm, &config.sound, sink, &ringing);
@@ -382,6 +393,27 @@ fn rows(config: &Config) -> Vec<AlarmRow> {
             next_fire: next_fire_text(alarm, now).into(),
         })
         .collect()
+}
+
+/// 所有闹钟里最早的那一次,给托盘显示。
+fn next_fire_summary(
+    config: &Config,
+    now: chrono::NaiveDateTime,
+) -> String {
+    match config
+        .alarms
+        .iter()
+        .filter_map(|alarm| schedule::next_fire(alarm, now))
+        .min()
+    {
+        Some(next) => format!(
+            "下次 {} {:02}:{:02}",
+            weekday_name(next.date().weekday()),
+            next.hour(),
+            next.minute()
+        ),
+        None => "没有闹钟".into(),
+    }
 }
 
 fn next_fire_text(

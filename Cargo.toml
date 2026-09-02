@@ -26,6 +26,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 thiserror = "2"
+# 托盘走 StatusNotifierItem。blocking API 配得上 Slint 这种非 async 程序;运行时挑
+# async-io 而不是默认的 tokio,zbus 那条链上已经有它了,不必为一个图标再拖一个运行时。
+ksni = { version = "0.3", default-features = false, features = [
+  "blocking",
+  "async-io",
+] }
 
 [build-dependencies]
 slint-build = "1.17"

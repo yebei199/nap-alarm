@@ -30,6 +30,21 @@ the next alarm. A long sleep wakes at the wrong time after a suspend or a clock
 change; reading the current time cannot. A minute slept through never fires
 late, and an alarm fires once in its minute however often it is polled.
 
+## The tray icon
+
+A resident daemon with no window is invisible: nothing says whether it is
+running, when it will ring next, or where its settings are. So it registers a
+StatusNotifierItem — the only tray protocol still alive on Wayland — showing
+the next alarm, a way into the settings window, and a way out.
+
+The icon is drawn in code rather than named. An icon name is resolved by the
+tray host in *its* icon theme, and a machine whose only themes are hicolor and
+locolor has no `alarm-symbolic` to find; the tray would show a blank slot.
+
+Quitting from the menu is a real quit. Under a systemd unit that restarts on
+failure it stays quit, which is the point; `Restart=always` would bring it
+straight back and make the menu entry a lie.
+
 ## The config file
 
 `~/.config/nap-alarm/alarms.toml`. The settings window writes it on every edit,
